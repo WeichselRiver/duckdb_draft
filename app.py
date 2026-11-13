@@ -142,13 +142,20 @@ def get_owned_stamp_counts() -> dict[str, int]:
     return counts
 
 
-def get_stamps_by_gebiet(gebiet: str) -> list[dict]:
-    """Return the stamps of one Gebiet, or all stamps if the filter is 'Alle'."""
-    if gebiet == ALL_GEBIETE:
-        return get_all_stamps()
-    return _query_dicts(
-        "SELECT * FROM stamps WHERE gebiet = ? ORDER BY katalognummer ASC, id ASC", [gebiet]
-    )
+def get_stamps_by_gebiet(gebiet: str, katalognummer_filter: str = "") -> list[dict]:
+    """Return stamps filtered by Gebiet and a partial catalog-number match."""
+    query = "SELECT * FROM stamps"
+    conditions = []
+    params = []
+    if gebiet != ALL_GEBIETE:
+        conditions.append("gebiet = ?")
+        params.append(gebiet)
+    if katalognummer_filter:
+        conditions.append("CAST(katalognummer AS VARCHAR) LIKE ?")
+        params.append(f"%{katalognummer_filter}%")
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    return _query_dicts(query + " ORDER BY katalognummer ASC, id ASC", params)
 
 
 def get_collection_stats(gebiet: str) -> list[dict]:
@@ -391,6 +398,10 @@ def query_page():
             label="Gebiet anzeigen",
             on_change=lambda: refresh(),
         ).classes("w-64")
+        katalognummer_filter = ui.input(
+            "Katalognummer suchen",
+            on_change=lambda: refresh(),
+        ).props("clearable").classes("w-64")
         with ui.row().classes("w-full no-wrap items-start"):
             table = ui.table(
                 columns=TABLE_COLUMNS,
@@ -419,7 +430,8 @@ def query_page():
         gebiet_filter.options = [ALL_GEBIETE] + get_gebiete()
         gebiet_filter.update()
         selected = gebiet_filter.value or ALL_GEBIETE
-        table.rows = get_stamps_by_gebiet(selected)
+        table.rows = get_stamps_by_gebiet(selected, katalognummer_filter.value or "")
+        table.pagination = {**table.pagination, "page": 1}
         table.update()
         stats_table.rows = get_collection_stats(selected)
         stats_table.update()
