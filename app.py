@@ -12,7 +12,7 @@ con = duckdb.connect(str(DB_PATH))
 
 
 
-GEBIETE = ["USA", "AD Baden", "AD Bayern", "Südafrika"]
+GEBIETE = ["USA", "AD Baden", "AD Bayern", "AD Bayern Dienst", "AD Bayern Porto", "AD Bergedorf", "AD Bremen", "AD Braunschweig", "AD Hamburg", "Südafrika"]
 MAX_KATALOGNUMMER = 2_147_483_647
 
 def initialize_stamps_table():
@@ -132,10 +132,13 @@ def get_gebiete() -> list[str]:
 def get_owned_stamp_counts() -> dict[str, int]:
     """Return the number of stamps in possession for each configured Gebiet."""
     counts = dict.fromkeys(GEBIETE, 0)
-    rows = con.execute("""
+    if not GEBIETE:
+        return counts
+    placeholders = ", ".join("?" for _ in GEBIETE)
+    rows = con.execute(f"""
         SELECT gebiet, COUNT(*) AS anzahl
         FROM stamps
-        WHERE besitz > 0 AND gebiet IN (?, ?, ?, ?)
+        WHERE besitz > 0 AND gebiet IN ({placeholders})
         GROUP BY gebiet
     """, GEBIETE).fetchall()
     counts.update({gebiet: anzahl for gebiet, anzahl in rows})
@@ -155,6 +158,16 @@ def get_stamps_by_gebiet(gebiet: str, katalognummer_filter: str = "") -> list[di
         params.append(f"%{katalognummer_filter}%")
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
+    return _query_dicts(query + " ORDER BY katalognummer ASC, id ASC", params)
+
+
+def get_missing_stamps(gebiet: str) -> list[dict]:
+    """Return stamps with no copies in possession, optionally filtered by Gebiet."""
+    query = "SELECT * FROM stamps WHERE besitz = 0"
+    params = []
+    if gebiet != ALL_GEBIETE:
+        query += " AND gebiet = ?"
+        params.append(gebiet)
     return _query_dicts(query + " ORDER BY katalognummer ASC, id ASC", params)
 
 
@@ -291,6 +304,7 @@ def page_navigation():
         ui.link("Eingabe", "/")
         ui.link("Bereichseingabe", "/bereich")
         ui.link("Abfrage", "/abfrage")
+        ui.link("Fehlliste", "/fehlliste")
 
 
 @ui.page("/")
@@ -383,6 +397,32 @@ def range_input_page():
 
         with ui.row().classes("justify-end w-full"):
             ui.button("Bereich hinzufügen", icon="save", on_click=save_range)
+
+
+@ui.page("/fehlliste")
+def missing_stamps_page():
+    page_navigation()
+    ui.label("Briefmarkensammlung").classes("text-h4")
+
+    with ui.card().classes("w-full"):
+        ui.label("Fehlliste").classes("text-h6")
+        gebiet_filter = ui.select(
+            options=[ALL_GEBIETE] + get_gebiete(),
+            value=ALL_GEBIETE,
+            label="Gebiet anzeigen",
+            on_change=lambda: refresh(),
+        ).classes("w-64")
+        table = ui.table(
+            columns=TABLE_COLUMNS[:-1],
+            rows=get_missing_stamps(ALL_GEBIETE),
+            row_key="id",
+            pagination=100,
+        ).classes("w-full")
+
+    def refresh():
+        table.rows = get_missing_stamps(gebiet_filter.value or ALL_GEBIETE)
+        table.pagination = {**table.pagination, "page": 1}
+        table.update()
 
 
 @ui.page("/abfrage")
